@@ -308,6 +308,7 @@ historyPageList.addEventListener("click", (event) => {
 });
 
 function showView(viewName) {
+  const previousView = currentView;
   currentView = viewName;
   Object.entries(views).forEach(([name, view]) => {
     view.hidden = name !== viewName;
@@ -319,6 +320,15 @@ function showView(viewName) {
     document.body.classList.remove("splash-active");
   }
   render();
+  if (previousView && previousView !== viewName) {
+    closeCollapsibleMenus();
+  }
+}
+
+function closeCollapsibleMenus() {
+  document.querySelectorAll("details[open]").forEach((details) => {
+    details.open = false;
+  });
 }
 
 function playHomeWelcome() {
