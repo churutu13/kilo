@@ -602,7 +602,7 @@ svg {
 .templates-panel details,
 .progress-panel details {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .templates-panel summary,
@@ -672,19 +672,31 @@ svg {
 }
 
 .template-actions {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-top: 10px;
+  margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
 .template-actions.single-action {
+  display: grid;
   grid-template-columns: 1fr;
 }
 
-.template-actions button:last-child {
+.template-actions + .template-actions {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.template-actions button {
+  flex: 1 1 118px;
+  min-height: 44px;
+}
+
+.template-actions:not(.single-action) button:last-child {
   color: var(--warn);
 }
 
@@ -744,11 +756,11 @@ ul {
 .template-card,
 .history-card {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #14181c;
-  padding: 12px;
+  padding: 14px;
 }
 
 .exercise-card header,
@@ -816,7 +828,7 @@ ul {
 }
 
 .history-card {
-  padding: 12px;
+  padding: 14px;
 }
 
 .history-card h3 {
@@ -825,7 +837,7 @@ ul {
 
 .history-card details {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .history-card summary {
@@ -850,17 +862,18 @@ ul {
 
 .saved-session-list {
   display: grid;
-  gap: 8px;
-  padding-top: 10px;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
 .saved-session-list > li {
   display: grid;
-  gap: 7px;
+  gap: 9px;
   border-radius: var(--radius);
   background: rgba(27, 31, 35, 0.76);
-  padding: 10px;
+  padding: 12px;
 }
 
 .saved-session-list h4 {
@@ -955,7 +968,7 @@ ul {
 }
 
 .history-card .stats {
-  margin-top: 7px;
+  margin-top: 8px;
 }
 
 .history-card .stats span {
@@ -977,6 +990,14 @@ ul {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
+}
+
+.history-date-label {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
 }
 
 .history-template-row button {

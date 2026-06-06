@@ -35,6 +35,7 @@ let currentView = "";
 let welcomePlayed = sessionStorage.getItem("gym-log-welcome-played") === "true";
 let templateAddMode = false;
 let templateExerciseEditMode = false;
+let replacingActiveWorkout = false;
 
 if (state.exercises.length && !state.sessionStartedAt) {
   state.sessionStartedAt = new Date().toISOString();
@@ -293,9 +294,17 @@ list.addEventListener("input", (event) => {
 });
 
 historyPageList.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-history-delete]");
-  if (!button) return;
-  deleteHistoryWorkout(button.dataset.historyDelete);
+  const deleteButton = event.target.closest("[data-history-delete]");
+  const renameButton = event.target.closest("[data-history-rename]");
+
+  if (deleteButton) {
+    deleteHistoryWorkout(deleteButton.dataset.historyDelete);
+    return;
+  }
+
+  if (renameButton) {
+    renameHistoryWorkout(renameButton.dataset.historyRename);
+  }
 });
 
 function showView(viewName) {
@@ -333,6 +342,14 @@ function playHomeWelcome() {
 }
 
 function openStartPanel() {
+  replacingActiveWorkout = false;
+
+  if (hasActiveWorkout()) {
+    const replace = confirm("Hai già un allenamento in corso. Vuoi iniziarne uno nuovo e sostituire quello attuale?");
+    if (!replace) return;
+    replacingActiveWorkout = true;
+  }
+
   if (!state.sessionStartedAt) {
     state.sessionStartedAt = new Date().toISOString();
     saveCurrent();
@@ -344,15 +361,17 @@ function openStartPanel() {
 
 function closeStartPanel() {
   document.querySelector("#startSheet").hidden = true;
+  replacingActiveWorkout = false;
 }
 
 function startBlankWorkout() {
-  const isReplacing = state.exercises.length > 0;
-  if (isReplacing && !confirm("Sostituire la sessione corrente?")) return;
+  const isReplacing = replacingActiveWorkout || state.exercises.length > 0;
+  if (state.exercises.length > 0 && !replacingActiveWorkout && !confirm("Sostituire la sessione corrente?")) return;
   state.editingTemplate = null;
   state.activeTemplateWorkout = false;
   templateAddMode = false;
   templateExerciseEditMode = false;
+  replacingActiveWorkout = false;
   state.exercises = [];
   state.sessionStartedAt = isReplacing ? new Date().toISOString() : state.sessionStartedAt ?? new Date().toISOString();
   saveCurrent();
@@ -363,12 +382,13 @@ function startBlankWorkout() {
 function startTemplateWorkout(templateId) {
   const template = state.templates.find((item) => item.id === templateId);
   if (!template) return;
-  const isReplacing = state.exercises.length > 0;
-  if (isReplacing && !confirm("Sostituire la sessione corrente?")) return;
+  const isReplacing = replacingActiveWorkout || state.exercises.length > 0;
+  if (state.exercises.length > 0 && !replacingActiveWorkout && !confirm("Sostituire la sessione corrente?")) return;
   state.editingTemplate = null;
   state.activeTemplateWorkout = true;
   templateAddMode = false;
   templateExerciseEditMode = false;
+  replacingActiveWorkout = false;
   state.exercises = cloneSessionExercises(template.exercises);
   state.sessionStartedAt = isReplacing ? new Date().toISOString() : state.sessionStartedAt ?? new Date().toISOString();
   saveCurrent();
@@ -433,7 +453,7 @@ function renderWorkoutMode() {
 
 function renderActiveWorkoutPill() {
   const pill = document.querySelector("#activeWorkoutPill");
-  const isActiveWorkout = Boolean(state.sessionStartedAt && !state.editingTemplate);
+  const isActiveWorkout = hasActiveWorkout();
   const homeIntroRunning = currentView === "home" && !document.querySelector("#homeView").classList.contains("home-ready");
   pill.hidden = !isActiveWorkout || currentView === "workout" || homeIntroRunning;
 }
@@ -523,15 +543,19 @@ function renderHistory(workout, options = {}) {
   const exerciseCount = workout.exercises.length;
   const sets = workout.exercises.reduce((sum, item) => sum + normalizeSets(item).length, 0);
   const date = formatHistoryDate(workout.date);
+  const title = workout.title?.trim();
   const templateAction = options.templateAction ?? true;
   const deleteAction = options.deleteAction ?? false;
+  const renameAction = options.renameAction ?? false;
+  const templateLabel = options.templateLabel ?? "Salva come template";
 
   return `
     <li class="history-card">
       <details>
         <summary>
           <div>
-            <h3>${date}</h3>
+            <h3>${escapeHtml(title || date)}</h3>
+            ${title ? `<span class="history-date-label">${date}</span>` : ""}
             <div class="stats">
               <span>${exerciseCount} esercizi</span>
               <span>${sets} serie</span>
@@ -545,7 +569,12 @@ function renderHistory(workout, options = {}) {
         </ul>
         ${templateAction ? `
           <div class="template-actions single-action">
-            <button type="button" data-history-template="${workout.id}">Salva come template</button>
+            <button type="button" data-history-template="${workout.id}">${templateLabel}</button>
+          </div>
+        ` : ""}
+        ${renameAction ? `
+          <div class="template-actions single-action">
+            <button type="button" data-history-rename="${workout.id}">Rinomina</button>
           </div>
         ` : ""}
         ${deleteAction ? `
@@ -601,25 +630,7 @@ function renderStartTemplates() {
 function renderTemplateHistory() {
   templateHistorySummary.textContent = `${state.history.length} sessioni`;
   templateHistoryList.innerHTML = state.history.length
-    ? state.history.map((workout) => {
-      const exerciseCount = workout.exercises.length;
-      const sets = workout.exercises.reduce((sum, item) => sum + normalizeSets(item).length, 0);
-
-      return `
-        <li class="history-card">
-          <div class="history-template-row">
-            <div>
-              <h3>${formatHistoryDate(workout.date)}</h3>
-              <div class="stats">
-                <span>${exerciseCount} esercizi</span>
-                <span>${sets} serie</span>
-              </div>
-            </div>
-            <button type="button" data-history-template="${workout.id}">Crea</button>
-          </div>
-        </li>
-      `;
-    }).join("")
+    ? state.history.map((workout) => renderHistory(workout, { templateAction: true, templateLabel: "Crea" })).join("")
     : "<li class=\"empty-state\">Nessuna sessione nello storico.</li>";
 }
 
@@ -655,7 +666,7 @@ function renderTemplate(template) {
 
 function renderHistoryPage() {
   historyPageEmpty.hidden = state.history.length > 0;
-  historyPageList.innerHTML = state.history.map((workout) => renderHistory(workout, { templateAction: false, deleteAction: true })).join("");
+  historyPageList.innerHTML = state.history.map((workout) => renderHistory(workout, { templateAction: false, renameAction: true, deleteAction: true })).join("");
 }
 
 function renderExerciseSuggestions() {
@@ -808,7 +819,8 @@ function loadTemplate(templateId) {
   const template = state.templates.find((item) => item.id === templateId);
   if (!template) return;
 
-  if (state.exercises.length && !confirm("Sostituire la sessione corrente con questo template?")) return;
+  if (hasActiveWorkout() && !confirm("Hai già un allenamento in corso. Vuoi iniziarne uno nuovo con questo template?")) return;
+  if (!hasActiveWorkout() && state.exercises.length && !confirm("Sostituire la sessione corrente con questo template?")) return;
 
   state.editingTemplate = null;
   state.activeTemplateWorkout = true;
@@ -832,6 +844,22 @@ function deleteTemplate(templateId) {
 function deleteHistoryWorkout(workoutId) {
   if (!confirm("Eliminare questo allenamento dallo storico?")) return;
   state.history = state.history.filter((workout) => workout.id !== workoutId);
+  persist();
+  render();
+}
+
+function renameHistoryWorkout(workoutId) {
+  const workout = state.history.find((item) => item.id === workoutId);
+  if (!workout) return;
+
+  const currentName = workout.title?.trim() || "";
+  const name = prompt("Nome allenamento", currentName);
+  if (name === null) return;
+
+  state.history = state.history.map((item) => {
+    if (item.id !== workoutId) return item;
+    return { ...item, title: name.trim() };
+  });
   persist();
   render();
 }
@@ -1137,6 +1165,10 @@ function deltaClass(number) {
 function getSessionDurationSeconds() {
   if (!state.sessionStartedAt) return 0;
   return Math.max(0, Math.floor((Date.now() - new Date(state.sessionStartedAt).getTime()) / 1000));
+}
+
+function hasActiveWorkout() {
+  return Boolean(state.sessionStartedAt && !state.editingTemplate);
 }
 
 function formatDuration(totalSeconds) {
