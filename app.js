@@ -36,18 +36,32 @@ const emptyState = document.querySelector("#emptyState");
 const setRows = document.querySelector("#setRows");
 const durationField = document.querySelector("#durationField");
 const stretchingSetsField = document.querySelector("#stretchingSetsField");
+const supersetPanel = document.querySelector("#supersetPanel");
+const supersetToggle = document.querySelector("#supersetToggle");
+const supersetFields = document.querySelector("#supersetFields");
+const supersetThirdField = document.querySelector("#supersetThirdField");
+const supersetSetRows2 = document.querySelector("#supersetSetRows2");
+const supersetSetRows3 = document.querySelector("#supersetSetRows3");
 const myExercisesList = document.querySelector("#myExercisesList");
 const myExercisesEmpty = document.querySelector("#myExercisesEmpty");
 const myExercisesSummary = document.querySelector("#myExercisesSummary");
+const restTimerPill = document.querySelector("#restTimerPill");
+const restTimerValue = document.querySelector("#restTimerValue");
 let selectedRest = 90;
 let currentView = "";
 let currentExerciseType = "strength";
-let introPlayed = sessionStorage.getItem("gym-log-intro-played") === "true";
+let introPlayed = localStorage.getItem("gym-log-intro-played") === "true";
 let welcomePlayed = sessionStorage.getItem("gym-log-welcome-played") === "true";
 let templateAddMode = false;
 let templateExerciseEditMode = false;
 let replacingActiveWorkout = false;
 let saveCurrentTimer = null;
+let activeSuggestionInput = document.querySelector("#exerciseName");
+let introTimer = null;
+let introOpenedFromInfo = false;
+let restTimerEndsAt = null;
+let restTimerInterval = null;
+let restTimerNotified = false;
 
 if (state.exercises.length && !state.sessionStartedAt) {
   state.sessionStartedAt = new Date().toISOString();
@@ -72,6 +86,13 @@ document.querySelector("#addSet").addEventListener("click", () => {
   addSetRow(getLastSetValue());
 });
 
+document.querySelectorAll("[data-add-superset-set]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const container = button.dataset.addSupersetSet === "2" ? supersetSetRows2 : supersetSetRows3;
+    addSetRow(getLastSetValue(container), container);
+  });
+});
+
 document.querySelector("#createBlankTemplate").addEventListener("click", createBlankTemplate);
 document.querySelector("#newWorkoutButton").addEventListener("click", (event) => {
   event.stopPropagation();
@@ -80,7 +101,9 @@ document.querySelector("#newWorkoutButton").addEventListener("click", (event) =>
 document.querySelector("#startBlankWorkout").addEventListener("click", startBlankWorkout);
 document.querySelector("#closeStartSheet").addEventListener("click", closeStartPanel);
 document.querySelector("#finishOnboarding").addEventListener("click", finishOnboarding);
+document.querySelector("#closeIntro").addEventListener("click", closeIntro);
 document.querySelector("#activeWorkoutPill").addEventListener("click", () => showView("workout"));
+restTimerPill.addEventListener("click", stopRestTimer);
 document.querySelector("#toggleTemplateEdit").addEventListener("click", () => {
   templateExerciseEditMode = !templateExerciseEditMode;
   render();
@@ -94,12 +117,20 @@ document.querySelector("#resetDatabase").addEventListener("click", resetDatabase
 document.querySelectorAll("[name='exerciseType']").forEach((input) => {
   input.addEventListener("change", () => {
     currentExerciseType = input.value;
+    if (currentExerciseType !== "strength") {
+      supersetToggle.checked = false;
+      supersetThirdField.hidden = true;
+      document.querySelector("#toggleSupersetThird").textContent = "Aggiungi terzo esercizio";
+    }
     renderExerciseTypeFields();
   });
 });
 
 document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => {
+    if (button.dataset.viewTarget === "intro") {
+      introOpenedFromInfo = true;
+    }
     showView(button.dataset.viewTarget);
   });
 });
@@ -108,8 +139,27 @@ document.querySelector("#exerciseName").addEventListener("input", renderExercise
 
 document.querySelector("#exerciseName").addEventListener("focus", renderExerciseSuggestions);
 
+document.querySelectorAll("[data-suggestion-input], #exerciseName").forEach((input) => {
+  input.addEventListener("input", renderExerciseSuggestions);
+  input.addEventListener("focus", () => {
+    activeSuggestionInput = input;
+    renderExerciseSuggestions();
+  });
+});
+
+supersetToggle.addEventListener("change", () => {
+  renderExerciseTypeFields();
+});
+
+document.querySelector("#toggleSupersetThird").addEventListener("click", () => {
+  const isOpening = supersetThirdField.hidden;
+  supersetThirdField.hidden = !isOpening;
+  document.querySelector("#toggleSupersetThird").textContent = isOpening ? "Rimuovi terzo esercizio" : "Aggiungi terzo esercizio";
+  if (!isOpening) document.querySelector("#supersetName3").value = "";
+});
+
 document.addEventListener("click", (event) => {
-  if (event.target.closest(".field-wide") || event.target.closest("#exerciseSuggestions")) return;
+  if (event.target.closest(".field") || event.target.closest("#exerciseSuggestions")) return;
   hideExerciseSuggestions();
 });
 
@@ -124,21 +174,30 @@ exerciseSuggestions.addEventListener("click", (event) => {
   const button = event.target.closest("[data-suggestion]");
   if (!button) return;
 
-  document.querySelector("#exerciseName").value = button.dataset.suggestion;
+  activeSuggestionInput.value = button.dataset.suggestion;
   hideExerciseSuggestions();
-  if (currentExerciseType === "strength") {
+  if (currentExerciseType === "strength" && activeSuggestionInput.id === "exerciseName") {
     setRows.querySelector("[name='weight']").focus();
   } else {
-    document.querySelector("#exerciseDuration").focus();
+    activeSuggestionInput.blur();
   }
 });
 
 setRows.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-remove-set]");
-  if (!button || setRows.children.length === 1) return;
-  button.closest(".set-row").remove();
-  syncSetLabels();
+  handleSetRowsClick(event);
 });
+
+[supersetSetRows2, supersetSetRows3].forEach((container) => {
+  container.addEventListener("click", handleSetRowsClick);
+});
+
+function handleSetRowsClick(event) {
+  const button = event.target.closest("[data-remove-set]");
+  const container = event.currentTarget;
+  if (!button || container.children.length === 1) return;
+  button.closest(".set-row").remove();
+  syncSetLabels(container);
+}
 
 templatePageList.addEventListener("click", (event) => {
   handleTemplateListClick(event);
@@ -171,11 +230,12 @@ document.querySelector("#profileForm").addEventListener("submit", (event) => {
   state.profile = {
     name: value("#profileName") || "Roberto",
     weight,
+    initialWeight: state.profile?.initialWeight ?? state.profile?.weight ?? weight,
     age: value("#profileAge"),
     goal: newGoal,
     gender: checkedValue("profileGender") || "neutral",
   };
-  addWeightEntry(weight);
+  addWeightEntry(weight, false, true);
   saveProfile();
   render();
   showView("home");
@@ -197,6 +257,14 @@ weightProgressPanel.addEventListener("submit", (event) => {
   const input = event.target.querySelector("[name='weeklyWeight']");
   addWeightEntry(input.value.trim(), true);
   renderProgressPage();
+});
+
+weightProgressPanel.addEventListener("click", (event) => {
+  const point = event.target.closest("[data-weight-point]");
+  if (!point) return;
+  const readout = weightProgressPanel.querySelector("#weightChartReadout");
+  if (!readout) return;
+  readout.textContent = `${point.dataset.weight} kg · ${point.dataset.date}`;
 });
 
 function handleTemplateListClick(event) {
@@ -232,8 +300,22 @@ form.addEventListener("submit", (event) => {
   const exerciseType = currentExerciseType;
   const durationValue = Number(value("#exerciseDuration"));
   const stretchingSets = Number(value("#stretchingSets"));
+  const isSuperset = exerciseType === "strength" && supersetToggle.checked;
   const sets = exerciseType === "strength" ? getSetValues() : [];
+  const supersetExercises = isSuperset ? getSupersetExerciseValues() : [];
   if (sets === null) return;
+
+  if (isSuperset && supersetExercises.length < 2) {
+    alert("Inserisci almeno due esercizi per il superset.");
+    return;
+  }
+
+  if (isSuperset && supersetExercises.some((item) => !item.sets)) return;
+
+  if (isSuperset && supersetExercises.some((item) => !item.sets.length)) {
+    alert("Compila almeno una serie per ogni esercizio del superset.");
+    return;
+  }
 
   if (exerciseType === "strength" && !sets.length) {
     alert("Compila almeno una serie.");
@@ -252,9 +334,12 @@ form.addEventListener("submit", (event) => {
 
   const exercise = {
     id: crypto.randomUUID(),
-    name: value("#exerciseName"),
+    name: isSuperset ? supersetExercises.map((item) => item.name).join(" + ") : value("#exerciseName"),
+    names: isSuperset ? supersetExercises.map((item) => item.name) : null,
+    supersetExercises: isSuperset ? supersetExercises : null,
+    isSuperset,
     type: exerciseType,
-    sets,
+    sets: isSuperset ? [] : sets,
     durationMinutes: exerciseType === "cardio" ? durationValue : null,
     durationSeconds: exerciseType === "stretching" ? durationValue : null,
     stretchSets: exerciseType === "stretching" ? stretchingSets : null,
@@ -262,13 +347,22 @@ form.addEventListener("submit", (event) => {
     createdAt: new Date().toISOString(),
   };
 
-  state.exercises.unshift(exercise);
-  rememberExerciseName(exercise.name, exercise.type);
+  state.exercises.push(exercise);
+  if (isSuperset) {
+    supersetExercises.forEach((item) => rememberExerciseName(item.name, exercise.type));
+  } else {
+    rememberExerciseName(exercise.name, exercise.type);
+  }
   saveCurrent();
   form.reset();
   currentExerciseType = exerciseType;
+  supersetToggle.checked = false;
+  supersetThirdField.hidden = true;
+  document.querySelector("#toggleSupersetThird").textContent = "Aggiungi terzo esercizio";
   selectedRest = exercise.rest;
   resetSetRows();
+  resetSetRows(supersetSetRows2);
+  resetSetRows(supersetSetRows3);
   renderExerciseTypeFields();
   syncRestButtons();
   hideExerciseSuggestions();
@@ -288,6 +382,7 @@ document.querySelector("#finishWorkout").addEventListener("click", () => {
     state.activeTemplateWorkout = false;
     templateAddMode = false;
     templateExerciseEditMode = false;
+    stopRestTimer();
     saveCurrent();
     showView("home");
     return;
@@ -304,6 +399,7 @@ document.querySelector("#finishWorkout").addEventListener("click", () => {
   state.activeTemplateWorkout = false;
   templateAddMode = false;
   templateExerciseEditMode = false;
+  stopRestTimer();
   persist();
   showView("home");
 });
@@ -313,6 +409,7 @@ list.addEventListener("click", (event) => {
   const addSetButton = event.target.closest("[data-add-set-to-exercise]");
   const removeSetButton = event.target.closest("[data-remove-inline-set]");
   const restButton = event.target.closest("[data-rest-update]");
+  const timerButton = event.target.closest("[data-start-rest-timer]");
 
   if (button) {
     if (state.activeTemplateWorkout && !templateExerciseEditMode) return;
@@ -348,6 +445,11 @@ list.addEventListener("click", (event) => {
       ...exercise,
       rest: Number(restButton.dataset.restValue),
     }));
+    return;
+  }
+
+  if (timerButton) {
+    startRestTimer(Number(timerButton.dataset.restSeconds) || 90);
   }
 });
 
@@ -361,7 +463,7 @@ list.addEventListener("input", (event) => {
       if (index !== setIndex) return set;
       return {
         ...set,
-        [input.dataset.setField]: Number(input.value) || 0,
+        [input.dataset.setField]: input.dataset.setField === "weight" ? parseDecimal(input.value) : Number(input.value) || 0,
       };
     });
     return { ...exercise, sets };
@@ -390,10 +492,12 @@ function showView(viewName) {
   });
   closeStartPanel();
   if (viewName === "home") {
+    introOpenedFromInfo = false;
     playHomeWelcome();
   } else if (viewName === "intro") {
     playIntro();
   } else {
+    introOpenedFromInfo = false;
     document.body.classList.remove("splash-active");
   }
   render();
@@ -404,11 +508,25 @@ function showView(viewName) {
 
 function playIntro() {
   document.body.classList.add("splash-active");
-  window.setTimeout(() => {
-    introPlayed = true;
-    sessionStorage.setItem("gym-log-intro-played", "true");
+  if (introTimer) window.clearTimeout(introTimer);
+  document.querySelector("#closeIntro").hidden = !introOpenedFromInfo;
+  localStorage.setItem("gym-log-intro-played", "true");
+  introPlayed = true;
+  if (introOpenedFromInfo) return;
+  introTimer = window.setTimeout(() => {
     showView(state.profile ? "home" : "onboarding");
   }, 8000);
+}
+
+function closeIntro() {
+  if (introTimer) {
+    window.clearTimeout(introTimer);
+    introTimer = null;
+  }
+  localStorage.setItem("gym-log-intro-played", "true");
+  introPlayed = true;
+  introOpenedFromInfo = false;
+  showView(state.profile ? "home" : "onboarding");
 }
 
 function closeCollapsibleMenus() {
@@ -492,11 +610,12 @@ function finishOnboarding() {
   state.profile = {
     name: value("#profileNameSetup") || "Roberto",
     weight,
+    initialWeight: weight,
     age: value("#profileAgeSetup"),
     goal: checkedValue("goalSetup") || "massa",
     gender: checkedValue("genderSetup") || "neutral",
   };
-  addWeightEntry(weight);
+  addWeightEntry(weight, false, true);
   saveProfile();
   render();
   showView("home");
@@ -511,7 +630,7 @@ function render() {
   renderExerciseTypeFields();
   renderMyExercises();
   renderActiveWorkoutPill();
-  document.querySelector("#summaryExercises").textContent = state.exercises.length;
+  document.querySelector("#summaryExercises").textContent = countSessionExercises(state.exercises);
   document.querySelector("#summarySets").textContent = totalSets;
   renderDuration();
 
@@ -589,6 +708,9 @@ function renderExerciseTypeFields() {
   });
   const isStrength = currentExerciseType === "strength";
   const isStretching = currentExerciseType === "stretching";
+  supersetPanel.hidden = !isStrength;
+  supersetFields.hidden = !isStrength || !supersetToggle.checked;
+  supersetToggle.disabled = !isStrength;
   document.querySelector(".set-builder").hidden = !isStrength;
   document.querySelector(".rest-panel").hidden = !isStrength;
   durationField.hidden = isStrength;
@@ -628,17 +750,77 @@ function renderDuration() {
   document.querySelector("#summaryDuration").textContent = formatDuration(getSessionDurationSeconds());
 }
 
+function startRestTimer(seconds) {
+  restTimerEndsAt = Date.now() + seconds * 1000;
+  restTimerNotified = false;
+  requestNotificationPermission();
+  renderRestTimer();
+  if (restTimerInterval) window.clearInterval(restTimerInterval);
+  restTimerInterval = window.setInterval(renderRestTimer, 1000);
+}
+
+function renderRestTimer() {
+  if (!restTimerEndsAt) {
+    restTimerPill.hidden = true;
+    return;
+  }
+
+  const remaining = Math.max(0, Math.ceil((restTimerEndsAt - Date.now()) / 1000));
+  restTimerValue.textContent = formatDuration(remaining);
+  restTimerPill.classList.toggle("done", remaining === 0);
+  restTimerPill.hidden = false;
+
+  if (remaining === 0 && restTimerInterval) {
+    window.clearInterval(restTimerInterval);
+    restTimerInterval = null;
+  }
+
+  if (remaining === 0 && !restTimerNotified) {
+    restTimerNotified = true;
+    notifyRestDone();
+  }
+}
+
+function stopRestTimer() {
+  if (restTimerInterval) {
+    window.clearInterval(restTimerInterval);
+    restTimerInterval = null;
+  }
+  restTimerEndsAt = null;
+  restTimerNotified = false;
+  restTimerPill.hidden = true;
+  restTimerPill.classList.remove("done");
+}
+
+function requestNotificationPermission() {
+  if (!("Notification" in window) || Notification.permission !== "default") return;
+  Notification.requestPermission().catch(() => {});
+}
+
+function notifyRestDone() {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    new Notification("Recupero finito", {
+      body: "Puoi ripartire con la prossima serie.",
+    });
+  } catch {}
+}
+
 function renderExercise(exercise) {
   const sets = normalizeSets(exercise);
   const type = exercise.type ?? "strength";
+  const names = getExerciseNames(exercise);
+  const supersetExercises = getSupersetExercises(exercise);
   const canEditInline = Boolean(state.activeTemplateWorkout && !state.editingTemplate);
   const canDelete = !state.activeTemplateWorkout || state.editingTemplate || templateExerciseEditMode;
+  const canStartTimer = Boolean(state.activeTemplateWorkout && !state.editingTemplate && type === "strength");
 
   return `
     <li class="exercise-card">
       <header>
         <div>
-          <h3>${escapeHtml(exercise.name)}</h3>
+          <h3>${exercise.isSuperset ? "Superset" : escapeHtml(exercise.name)}</h3>
+          ${exercise.isSuperset ? `<ul class="superset-name-list">${names.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul>` : ""}
           ${type !== "strength" ? `<span class="type-label">${exerciseTypeLabel(type)}</span>` : ""}
         </div>
         ${canDelete ? `
@@ -649,14 +831,31 @@ function renderExercise(exercise) {
       </header>
       <div class="stats">
         ${type === "strength" ? `
-          <span>${sets.length} serie</span>
+          <span>${countExerciseSets(exercise)} serie</span>
           <span>${exercise.rest ?? 90}s pausa</span>
+          ${canStartTimer ? `<button class="timer-row-button" type="button" data-start-rest-timer="${exercise.id}" data-rest-seconds="${exercise.rest ?? 90}">Timer</button>` : ""}
         ` : `
           <span>${formatExerciseDuration(exercise)} durata</span>
           ${type === "stretching" ? `<span>${getStretchSets(exercise)} serie</span>` : ""}
         `}
       </div>
-      ${type === "strength" ? `
+      ${exercise.isSuperset ? `
+        <div class="superset-detail-list">
+          ${supersetExercises.map((item) => `
+            <section>
+              <h4>${escapeHtml(item.name)}</h4>
+              <ol class="set-list">
+                ${item.sets.map((set, index) => `
+                  <li>
+                    <span>Serie ${index + 1}</span>
+                    <strong>${formatNumber(set.weight)} kg x ${set.reps}</strong>
+                  </li>
+                `).join("")}
+              </ol>
+            </section>
+          `).join("")}
+        </div>
+      ` : type === "strength" ? `
         <ol class="set-list">
           ${sets.map((set, index) => renderExerciseSet(exercise, set, index, canEditInline)).join("")}
         </ol>
@@ -681,7 +880,7 @@ function renderExerciseSet(exercise, set, index, canEditInline) {
       <span>Serie ${index + 1}</span>
       <label>
         <small>Kg</small>
-        <input type="number" min="0" step="0.5" inputmode="decimal" value="${set.weight}" data-set-field="weight" data-exercise-id="${exercise.id}" data-set-index="${index}" />
+        <input type="text" inputmode="decimal" value="${set.weight}" data-set-field="weight" data-exercise-id="${exercise.id}" data-set-index="${index}" />
       </label>
       <label>
         <small>Rip.</small>
@@ -709,7 +908,7 @@ function renderInlineExerciseControls(exercise) {
 }
 
 function renderHistory(workout, options = {}) {
-  const exerciseCount = workout.exercises.length;
+  const exerciseCount = countSessionExercises(workout.exercises);
   const sets = countSessionSets(workout.exercises);
   const date = formatHistoryDate(workout.date);
   const title = workout.title?.trim();
@@ -759,12 +958,15 @@ function renderHistory(workout, options = {}) {
 function renderSavedExercise(exercise) {
   const sets = normalizeSets(exercise);
   const type = exercise.type ?? "strength";
+  const names = getExerciseNames(exercise);
+  const supersetExercises = getSupersetExercises(exercise);
 
   return `
     <li>
       <header>
         <div>
-          <h4>${escapeHtml(exercise.name)}</h4>
+          <h4>${exercise.isSuperset ? "Superset" : escapeHtml(exercise.name)}</h4>
+          ${exercise.isSuperset ? `<ul class="superset-name-list small">${names.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul>` : ""}
           ${type !== "strength" ? `<span class="type-label">${exerciseTypeLabel(type)}</span>` : ""}
         </div>
         <span>${type === "strength" ? `${exercise.rest ?? 90}s pausa` : formatExerciseDuration(exercise)}</span>
@@ -777,7 +979,23 @@ function renderSavedExercise(exercise) {
           </li>
         </ol>
       ` : ""}
-      ${type === "strength" ? `
+      ${exercise.isSuperset ? `
+        <div class="superset-detail-list">
+          ${supersetExercises.map((item) => `
+            <section>
+              <h4>${escapeHtml(item.name)}</h4>
+              <ol class="set-list">
+                ${item.sets.map((set, index) => `
+                  <li>
+                    <span>Serie ${index + 1}</span>
+                    <strong>${formatNumber(set.weight)} kg x ${set.reps}</strong>
+                  </li>
+                `).join("")}
+              </ol>
+            </section>
+          `).join("")}
+        </div>
+      ` : type === "strength" ? `
         <ol class="set-list">
           ${sets.map((set, index) => `
             <li>
@@ -804,7 +1022,7 @@ function renderStartTemplates() {
     <li class="template-card">
       <button class="start-template-button" type="button" data-start-template="${template.id}">
         <span>${escapeHtml(template.name)}</span>
-        <small>${template.exercises.length} esercizi</small>
+        <small>${countSessionExercises(template.exercises)} esercizi</small>
       </button>
     </li>
   `).join("");
@@ -818,7 +1036,7 @@ function renderTemplateHistory() {
 }
 
 function renderTemplate(template) {
-  const exerciseCount = template.exercises.length;
+  const exerciseCount = countSessionExercises(template.exercises);
   const sets = countSessionSets(template.exercises);
 
   return `
@@ -853,13 +1071,13 @@ function renderHistoryPage() {
 }
 
 function renderExerciseSuggestions() {
-  const input = document.querySelector("#exerciseName");
+  const input = activeSuggestionInput ?? document.querySelector("#exerciseName");
   if (document.activeElement !== input) {
     hideExerciseSuggestions();
     return;
   }
 
-  const query = value("#exerciseName");
+  const query = input.value.trim();
   const matches = getExerciseSuggestions(query, currentExerciseType).slice(0, 6);
 
   exerciseSuggestions.hidden = matches.length === 0;
@@ -885,8 +1103,11 @@ function renderWeightProgress() {
   const previous = entries.at(-2);
   const profile = state.profile ?? {};
   const goal = profile.goal ?? "massa";
+  const initialWeight = getInitialProfileWeight();
   const due = isWeightUpdateDue(latest?.date);
   const delta = latest && previous ? latest.weight - previous.weight : 0;
+  const initialDelta = latest && initialWeight ? latest.weight - initialWeight : 0;
+  const isGoalAligned = isWeightGoalAligned(goal, initialDelta, Boolean(latest && initialWeight));
   const goalCopy = goal === "perdere-peso"
     ? "Obiettivo: perdere peso"
     : "Obiettivo: massa";
@@ -897,67 +1118,117 @@ function renderWeightProgress() {
         <div>
           <h3>Peso corporeo</h3>
           <span>${goalCopy}</span>
+          <small class="${isGoalAligned ? "delta-up" : "delta-down"}">Stato: ${isGoalAligned ? "in linea" : "non in linea"}</small>
         </div>
-        ${latest ? `<strong class="${deltaClass(delta)}">${formatNumber(latest.weight)} kg</strong>` : ""}
+        ${latest ? `<strong class="${isGoalAligned ? "delta-up" : "delta-down"}">${formatNumber(latest.weight)} kg</strong>` : ""}
       </header>
-      <div class="progress-grid">
+      <div class="progress-grid two-up">
         <div>
-          <span>Ultimo dato</span>
-          <strong>${latest ? `${formatNumber(latest.weight)} kg` : "-"}</strong>
-          <small>${latest ? formatDate(latest.date) : "Da aggiornare"}</small>
+          <span>Variazione assoluta</span>
+          <strong class="${deltaClass(initialDelta)}">${latest && initialWeight ? `${formatSigned(initialDelta)} kg` : "0"}</strong>
+          <small>${initialWeight ? `dal peso iniziale ${formatNumber(initialWeight)} kg` : "peso iniziale mancante"}</small>
         </div>
         <div>
-          <span>Variazione</span>
+          <span>Ultima variazione</span>
           <strong>${latest && previous ? `${formatSigned(delta)} kg` : "0"}</strong>
           <small>${previous ? `da ${formatDate(previous.date)}` : "primo dato"}</small>
         </div>
-        <div>
-          <span>Direzione</span>
-          <strong>${goal === "perdere-peso" ? "Peso giu" : "Massa su"}</strong>
-          <small>${weightTrendCopy(goal, delta, entries.length)}</small>
-        </div>
       </div>
-      ${due ? `
-        <form class="weekly-weight-form">
-          <label class="field">
-            <span>Promemoria settimanale</span>
-            <input name="weeklyWeight" type="number" min="0" step="0.1" inputmode="decimal" placeholder="Aggiorna peso" required />
-          </label>
-          <button class="primary-action" type="submit">Aggiorna peso</button>
-        </form>
-      ` : ""}
+      ${entries.length >= 2 ? renderWeightChart(entries) : ""}
+      <form class="weekly-weight-form">
+        <label class="field">
+          <span>${due ? "Promemoria settimanale" : "Nuova misurazione"}</span>
+          <input name="weeklyWeight" type="text" inputmode="decimal" placeholder="Aggiorna peso" required />
+        </label>
+        <button class="primary-action" type="submit">Aggiorna peso</button>
+      </form>
     </article>
+  `;
+}
+
+function renderWeightChart(entries) {
+  const width = 320;
+  const height = 112;
+  const padding = 16;
+  const weights = entries.map((entry) => entry.weight);
+  const min = Math.min(...weights);
+  const max = Math.max(...weights);
+  const range = max - min || 1;
+  const points = entries.map((entry, index) => {
+    const x = padding + (index / Math.max(entries.length - 1, 1)) * (width - padding * 2);
+    const y = height - padding - ((entry.weight - min) / range) * (height - padding * 2);
+    return { x, y, entry };
+  });
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+
+  return `
+    <div class="weight-chart" aria-label="Grafico peso">
+      <div class="weight-chart-heading">
+        <span>Andamento peso</span>
+        <strong>${formatNumber(min)}-${formatNumber(max)} kg</strong>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Andamento del peso corporeo">
+        <path class="chart-grid-line" d="M ${padding} ${height - padding} H ${width - padding}" />
+        <path class="chart-line" d="${path}" />
+        ${points.map((point) => `
+          <circle
+            cx="${point.x.toFixed(1)}"
+            cy="${point.y.toFixed(1)}"
+            r="4.4"
+            tabindex="0"
+            data-weight-point
+            data-weight="${formatNumber(point.entry.weight)}"
+            data-date="${formatDate(point.entry.date)}"
+            aria-label="${formatNumber(point.entry.weight)} kg, ${formatDate(point.entry.date)}"
+          />
+        `).join("")}
+      </svg>
+      <div class="weight-chart-readout" id="weightChartReadout">Tocca un punto per leggere il peso</div>
+    </div>
   `;
 }
 
 function renderProgressItem(item) {
   return `
     <li class="progress-card">
-      <header>
-        <div>
-          <h3>${escapeHtml(item.name)}</h3>
-          <span>${formatDate(item.latest.date)} vs ${formatDate(item.previous.date)}</span>
+      <details>
+        <summary>
+          <header>
+            <div>
+              <h3>${escapeHtml(item.name)}</h3>
+            </div>
+          </header>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+        </summary>
+        <div class="progress-detail-meta">
+          <span>Ultimo: ${formatDate(item.latest.date)}</span>
+          <span>Precedente: ${formatDate(item.previous.date)}</span>
+          <span>Primo: ${formatDate(item.first.date)}</span>
         </div>
-        <strong class="${deltaClass(item.strengthDelta)}">${formatSigned(item.strengthDelta)} kg</strong>
-      </header>
-      <div class="progress-grid">
+        ${renderProgressComparison("Dal precedente", item.fromPrevious)}
+        ${renderProgressComparison("Dal primo", item.fromFirst)}
+      </details>
+    </li>
+  `;
+}
+
+function renderProgressComparison(title, comparison) {
+  return `
+    <section class="progress-comparison">
+      <h4>${title}</h4>
+      <div class="progress-grid two-up">
         <div>
-          <span>Forza stimata</span>
-          <strong>${formatNumber(item.latest.estimatedStrength)} kg</strong>
-          <small class="${deltaClass(item.strengthDelta)}">${formatSigned(item.strengthDelta)} kg</small>
+          <span>Peso totale</span>
+          <strong class="${deltaClass(comparison.totalWeightDelta)}">${formatSigned(comparison.totalWeightDelta)} kg</strong>
+          <small>${trendCopy(comparison.totalWeightDelta)}</small>
         </div>
         <div>
-          <span>Miglior set</span>
-          <strong>${formatNumber(item.latest.bestSet.weight)} kg x ${item.latest.bestSet.reps}</strong>
-          <small>${formatNumber(item.previous.bestSet.weight)} kg x ${item.previous.bestSet.reps}</small>
-        </div>
-        <div>
-          <span>Peso / reps</span>
-          <strong>${formatSigned(item.maxWeightDelta)} kg</strong>
-          <small class="${deltaClass(item.totalRepsDelta)}">${formatSigned(item.totalRepsDelta, 0)} rip. totali</small>
+          <span>Reps totali</span>
+          <strong class="${deltaClass(comparison.totalRepsDelta)}">${formatSigned(comparison.totalRepsDelta, 0)}</strong>
+          <small>${trendCopy(comparison.totalRepsDelta)}</small>
         </div>
       </div>
-    </li>
+    </section>
   `;
 }
 
@@ -1144,12 +1415,14 @@ function deleteMyExercise(exerciseId) {
   render();
 }
 
-function addWeightEntry(weightValue, shouldSyncProfile = false) {
-  const weight = Number(weightValue);
+function addWeightEntry(weightValue, shouldSyncProfile = false, replaceToday = false) {
+  const weight = parseDecimal(weightValue);
   if (!weight || weight <= 0) return;
 
   const todayKey = new Date().toISOString().slice(0, 10);
-  const existingIndex = state.weightEntries.findIndex((entry) => entry.date.slice(0, 10) === todayKey);
+  const existingIndex = replaceToday
+    ? state.weightEntries.findIndex((entry) => entry.date.slice(0, 10) === todayKey)
+    : -1;
   const entry = {
     id: existingIndex >= 0 ? state.weightEntries[existingIndex].id : crypto.randomUUID(),
     weight,
@@ -1212,7 +1485,7 @@ function resetDatabase() {
     "gym-log-active-template-workout",
   ].forEach((key) => localStorage.removeItem(key));
   sessionStorage.removeItem("gym-log-welcome-played");
-  sessionStorage.removeItem("gym-log-intro-played");
+  localStorage.removeItem("gym-log-intro-played");
 
   document.querySelector("#profileNameSetup").value = "";
   document.querySelector("#profileWeightSetup").value = "";
@@ -1226,18 +1499,22 @@ function value(selector) {
   return document.querySelector(selector).value.trim();
 }
 
+function parseDecimal(value) {
+  return Number(String(value).trim().replace(",", ".")) || 0;
+}
+
 function checkedValue(name) {
   return document.querySelector(`[name='${name}']:checked`)?.value ?? "";
 }
 
-function addSetRow(set = { reps: "", weight: "" }) {
+function addSetRow(set = { reps: "", weight: "" }, container = setRows) {
   const row = document.createElement("div");
   row.className = "set-row";
   row.innerHTML = `
     <strong></strong>
     <label class="field">
       <span>Kg</span>
-      <input name="weight" type="number" min="0" step="0.5" inputmode="decimal" value="${set.weight}" />
+      <input name="weight" type="text" inputmode="decimal" value="${set.weight}" />
     </label>
     <label class="field">
       <span>Rip.</span>
@@ -1247,21 +1524,21 @@ function addSetRow(set = { reps: "", weight: "" }) {
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
     </button>
   `;
-  setRows.append(row);
-  syncSetLabels();
+  container.append(row);
+  syncSetLabels(container);
 }
 
-function resetSetRows(lastSet = { reps: "", weight: "" }) {
-  setRows.innerHTML = "";
-  addSetRow(lastSet);
-  addSetRow(lastSet);
-  addSetRow(lastSet);
+function resetSetRows(container = setRows, lastSet = { reps: "", weight: "" }) {
+  container.innerHTML = "";
+  addSetRow(lastSet, container);
+  addSetRow(lastSet, container);
+  addSetRow(lastSet, container);
 }
 
-function syncSetLabels() {
-  setRows.querySelectorAll(".set-row").forEach((row, index) => {
+function syncSetLabels(container = setRows) {
+  container.querySelectorAll(".set-row").forEach((row, index) => {
     row.querySelector("strong").textContent = index + 1;
-    row.querySelector("[data-remove-set]").disabled = setRows.children.length === 1;
+    row.querySelector("[data-remove-set]").disabled = container.children.length === 1;
   });
 }
 
@@ -1271,10 +1548,10 @@ function syncRestButtons() {
   });
 }
 
-function getSetValues() {
+function getSetValues(container = setRows) {
   const sets = [];
 
-  for (const row of setRows.querySelectorAll(".set-row")) {
+  for (const row of container.querySelectorAll(".set-row")) {
     const weight = row.querySelector("[name='weight']").value.trim();
     const reps = row.querySelector("[name='reps']").value.trim();
     const isEmpty = !weight && !reps;
@@ -1287,7 +1564,7 @@ function getSetValues() {
     }
 
     sets.push({
-      weight: Number(weight),
+      weight: parseDecimal(weight),
       reps: Number(reps),
     });
   }
@@ -1295,8 +1572,8 @@ function getSetValues() {
   return sets;
 }
 
-function getLastSetValue() {
-  const lastSet = getSetValues().at(-1);
+function getLastSetValue(container = setRows) {
+  const lastSet = getSetValues(container).at(-1);
   if (!lastSet || !lastSet.weight || !lastSet.reps) {
     return { reps: "", weight: "" };
   }
@@ -1315,6 +1592,9 @@ function normalizeSets(exercise) {
 function cloneTemplateExercises(exercises) {
   return exercises.map((exercise) => ({
     name: exercise.name,
+    names: exercise.names ? [...exercise.names] : null,
+    isSuperset: Boolean(exercise.isSuperset),
+    supersetExercises: cloneSupersetExercises(exercise),
     type: exercise.type ?? "strength",
     rest: exercise.rest ?? 90,
     durationMinutes: exercise.durationMinutes ?? null,
@@ -1331,6 +1611,9 @@ function cloneSessionExercises(exercises) {
   return exercises.map((exercise) => ({
     id: crypto.randomUUID(),
     name: exercise.name,
+    names: exercise.names ? [...exercise.names] : null,
+    isSuperset: Boolean(exercise.isSuperset),
+    supersetExercises: cloneSupersetExercises(exercise),
     type: exercise.type ?? "strength",
     rest: exercise.rest ?? 90,
     durationMinutes: exercise.durationMinutes ?? null,
@@ -1364,17 +1647,18 @@ function getProgressItems() {
     .map((items) => {
       const latest = items.at(-1);
       const previous = items.at(-2);
+      const first = items[0];
 
       return {
         name: latest.name,
         latest,
         previous,
-        maxWeightDelta: latest.maxWeight - previous.maxWeight,
-        totalRepsDelta: latest.totalReps - previous.totalReps,
-        strengthDelta: latest.estimatedStrength - previous.estimatedStrength,
+        first,
+        fromPrevious: buildProgressDelta(latest, previous),
+        fromFirst: buildProgressDelta(latest, first),
       };
     })
-    .sort((a, b) => Math.abs(b.strengthDelta) - Math.abs(a.strengthDelta));
+    .sort((a, b) => Math.abs(b.fromPrevious.totalWeightDelta) - Math.abs(a.fromPrevious.totalWeightDelta));
 }
 
 function getExerciseSuggestions(query = "", type = currentExerciseType) {
@@ -1430,13 +1714,19 @@ function groupExercisesByName(exercises) {
   const grouped = new Map();
 
   exercises.forEach((exercise) => {
-    const key = exerciseKey(exercise.name);
-    if (!key) return;
+    const entries = exercise.isSuperset
+      ? getSupersetExercises(exercise)
+      : [{ name: exercise.name, sets: normalizeSets(exercise) }];
 
-    const existing = grouped.get(key) ?? { name: exercise.name.trim(), sets: [] };
-    grouped.set(key, {
-      name: existing.name,
-      sets: [...existing.sets, ...normalizeSets(exercise)],
+    entries.forEach((entry) => {
+      const key = exerciseKey(entry.name);
+      if (!key) return;
+
+      const existing = grouped.get(key) ?? { name: entry.name.trim(), sets: [] };
+      grouped.set(key, {
+        name: existing.name,
+        sets: [...existing.sets, ...entry.sets],
+      });
     });
   });
 
@@ -1445,34 +1735,100 @@ function groupExercisesByName(exercises) {
 
 function buildPerformance(key, exerciseGroup, date) {
   const cleanSets = exerciseGroup.sets.filter((set) => Number.isFinite(set.weight) && Number.isFinite(set.reps));
-  const bestSet = cleanSets.reduce((best, set) => {
-    return estimatedStrength(set) > estimatedStrength(best) ? set : best;
-  }, cleanSets[0] ?? { weight: 0, reps: 0 });
 
   return {
     key,
     name: exerciseGroup.name,
     date,
-    maxWeight: Math.max(...cleanSets.map((set) => set.weight), 0),
+    totalWeight: cleanSets.reduce((sum, set) => sum + set.weight, 0),
     totalReps: cleanSets.reduce((sum, set) => sum + set.reps, 0),
-    bestSet,
-    estimatedStrength: estimatedStrength(bestSet),
   };
 }
 
-function estimatedStrength(set) {
-  return set.weight * (1 + set.reps / 30);
+function buildProgressDelta(latest, baseline) {
+  return {
+    totalWeightDelta: latest.totalWeight - baseline.totalWeight,
+    totalRepsDelta: latest.totalReps - baseline.totalReps,
+  };
+}
+
+function getInitialProfileWeight() {
+  const initialProfileWeight = parseDecimal(state.profile?.initialWeight ?? "");
+  if (initialProfileWeight) return initialProfileWeight;
+  const profileWeight = parseDecimal(state.profile?.weight ?? "");
+  if (profileWeight) return profileWeight;
+  return [...state.weightEntries].sort((a, b) => new Date(a.date) - new Date(b.date))[0]?.weight ?? 0;
 }
 
 function countSessionSets(exercises) {
   return exercises.reduce((sum, exercise) => sum + countExerciseSets(exercise), 0);
 }
 
+function countSessionExercises(exercises) {
+  return exercises.reduce((sum, exercise) => sum + getExerciseNames(exercise).length, 0);
+}
+
 function countExerciseSets(exercise) {
   const type = exercise.type ?? "strength";
+  if (exercise.isSuperset) {
+    return getSupersetExercises(exercise).reduce((sum, item) => sum + item.sets.length, 0);
+  }
   if (type === "stretching") return getStretchSets(exercise);
   if (type === "cardio") return 0;
   return normalizeSets(exercise).length;
+}
+
+function getSupersetNames() {
+  return getSupersetExerciseValues().map((item) => item.name);
+}
+
+function getSupersetExerciseValues() {
+  const entries = [
+    { name: value("#exerciseName"), container: setRows },
+    { name: value("#supersetName2"), container: supersetSetRows2 },
+  ];
+
+  if (!supersetThirdField.hidden) {
+    entries.push({ name: value("#supersetName3"), container: supersetSetRows3 });
+  }
+
+  const result = [];
+  for (const entry of entries) {
+    if (!entry.name) continue;
+    const sets = getSetValues(entry.container);
+    result.push({ name: entry.name, sets });
+  }
+  return result;
+}
+
+function getExerciseNames(exercise) {
+  if (Array.isArray(exercise.names) && exercise.names.length) return exercise.names;
+  return [exercise.name].filter(Boolean);
+}
+
+function getSupersetExercises(exercise) {
+  if (Array.isArray(exercise.supersetExercises) && exercise.supersetExercises.length) {
+    return exercise.supersetExercises.map((item) => ({
+      name: item.name,
+      sets: Array.isArray(item.sets) ? item.sets : [],
+    }));
+  }
+
+  return getExerciseNames(exercise).map((name) => ({
+    name,
+    sets: normalizeSets(exercise),
+  }));
+}
+
+function cloneSupersetExercises(exercise) {
+  if (!exercise.isSuperset) return null;
+  return getSupersetExercises(exercise).map((item) => ({
+    name: item.name,
+    sets: item.sets.map((set) => ({
+      weight: set.weight,
+      reps: set.reps,
+    })),
+  }));
 }
 
 function isWeightUpdateDue(lastDate) {
@@ -1481,10 +1837,16 @@ function isWeightUpdateDue(lastDate) {
   return Date.now() - new Date(lastDate).getTime() >= weekMs;
 }
 
-function weightTrendCopy(goal, delta, entriesCount) {
-  if (entriesCount < 2 || delta === 0) return "monitoraggio attivo";
-  if (goal === "perdere-peso") return delta < 0 ? "in linea" : "da rivedere";
-  return delta > 0 ? "in linea" : "da rivedere";
+function isWeightGoalAligned(goal, delta, hasBaseline) {
+  if (!hasBaseline || delta === 0) return true;
+  if (goal === "perdere-peso") return delta < 0;
+  return delta > 0;
+}
+
+function trendCopy(delta) {
+  if (delta > 0) return "in salita";
+  if (delta < 0) return "in discesa";
+  return "stabile";
 }
 
 function exerciseTypeLabel(type) {
@@ -1654,8 +2016,10 @@ function escapeAttribute(text) {
 }
 
 resetSetRows();
+resetSetRows(supersetSetRows2);
+resetSetRows(supersetSetRows3);
 render();
-showView(introPlayed ? (state.profile ? "home" : "onboarding") : "intro");
+showView(state.profile ? "home" : (introPlayed ? "onboarding" : "intro"));
 setInterval(renderDuration, 1000);
 
 if ("serviceWorker" in navigator) {

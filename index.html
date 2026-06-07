@@ -19,6 +19,7 @@
           <p class="eyebrow">Kilo</p>
           <h1>Il tuo allenamento, tenuto in ordine.</h1>
           <p>Kilo ti aiuta a salvare sessioni, esercizi e progressi senza rumore: pochi gesti, dati chiari, e una traccia gentile di come stai crescendo settimana dopo settimana.</p>
+          <button class="ghost-button intro-close-button" id="closeIntro" type="button">Chiudi</button>
         </div>
       </section>
 
@@ -44,9 +45,9 @@
                 <input type="radio" name="genderSetup" value="female" />
                 <span>F</span>
               </label>
-              <label>
+              <label class="compact-option">
                 <input type="radio" name="genderSetup" value="neutral" />
-                <span>Preferisco non specificarlo</span>
+                <span>Non specificarlo</span>
               </label>
             </div>
           </article>
@@ -55,7 +56,7 @@
             <h2>Peso attuale</h2>
             <label class="field">
               <span>Kg</span>
-              <input id="profileWeightSetup" type="number" min="0" step="0.1" inputmode="decimal" />
+              <input id="profileWeightSetup" type="text" inputmode="decimal" />
             </label>
           </article>
           <article class="onboarding-card">
@@ -88,6 +89,7 @@
         <button class="profile-icon-button" data-view-target="profile" type="button" aria-label="Profilo atleta">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0" /></svg>
         </button>
+        <button class="info-button" data-view-target="intro" type="button" aria-label="Info su Kilo">i</button>
         <header class="home-hero">
           <h1 id="welcomeTitle">Benvenuto, Roberto</h1>
         </header>
@@ -154,6 +156,15 @@
             <span>Esercizio</span>
             <input id="exerciseName" type="text" inputmode="text" autocomplete="off" required />
           </label>
+          <div class="superset-panel" id="supersetPanel" hidden>
+            <div class="superset-heading">
+              <span>Superset</span>
+              <label class="ss-toggle">
+                <input id="supersetToggle" type="checkbox" />
+                <span>SS</span>
+              </label>
+            </div>
+          </div>
           <div id="exerciseSuggestions" class="suggestions" hidden></div>
 
           <label class="field duration-field" id="durationField" hidden>
@@ -175,6 +186,42 @@
               </button>
             </div>
             <div id="setRows" class="set-rows"></div>
+          </div>
+
+          <div class="superset-fields" id="supersetFields" hidden>
+            <div class="superset-exercise-block">
+              <label class="field">
+                <span>Esercizio 2</span>
+                <input id="supersetName2" type="text" inputmode="text" autocomplete="off" data-suggestion-input />
+              </label>
+              <div class="set-builder compact-set-builder">
+                <div class="set-heading">
+                  <span>Serie</span>
+                  <button type="button" data-add-superset-set="2">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                    Serie
+                  </button>
+                </div>
+                <div id="supersetSetRows2" class="set-rows"></div>
+              </div>
+            </div>
+            <div class="superset-exercise-block" id="supersetThirdField" hidden>
+              <label class="field">
+                <span>Esercizio 3</span>
+                <input id="supersetName3" type="text" inputmode="text" autocomplete="off" data-suggestion-input />
+              </label>
+              <div class="set-builder compact-set-builder">
+                <div class="set-heading">
+                  <span>Serie</span>
+                  <button type="button" data-add-superset-set="3">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                    Serie
+                  </button>
+                </div>
+                <div id="supersetSetRows3" class="set-rows"></div>
+              </div>
+            </div>
+            <button class="ghost-button" id="toggleSupersetThird" type="button">Aggiungi terzo esercizio</button>
           </div>
 
           <div class="rest-panel">
@@ -286,7 +333,7 @@
           </label>
           <label class="field">
             <span>Peso</span>
-            <input id="profileWeight" type="number" min="0" step="0.1" inputmode="decimal" />
+            <input id="profileWeight" type="text" inputmode="decimal" />
           </label>
           <div class="segmented-control" role="group" aria-label="Genere">
             <label>
@@ -297,9 +344,9 @@
               <input type="radio" name="profileGender" value="female" />
               <span>F</span>
             </label>
-            <label>
+            <label class="compact-option">
               <input type="radio" name="profileGender" value="neutral" />
-              <span>Preferisco non specificarlo</span>
+              <span>Non specificarlo</span>
             </label>
           </div>
           <div class="segmented-control" role="group" aria-label="Obiettivo">
@@ -375,6 +422,10 @@
       <button class="active-workout-pill" id="activeWorkoutPill" type="button" hidden>
         <span></span>
         Allenamento in corso
+      </button>
+      <button class="rest-timer-pill" id="restTimerPill" type="button" hidden>
+        <span>Recupero</span>
+        <strong id="restTimerValue">01:30</strong>
       </button>
     </main>
 

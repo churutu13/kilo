@@ -1,6 +1,6 @@
 # Kilo
 
-Tracker palestra mobile-first per iPhone. Include splash introduttivo, onboarding profilo con obiettivo e saluto personalizzato, home animata, sessioni attive con indicatore globale, modalita forza/cardio/stretching, progressi dedicati con tracking peso, "I tuoi allenamenti" per template modificabili, "I miei esercizi" nel profilo, storico apribile, autocomplete sugli esercizi salvati e confronto progressivo tra sessioni per gli stessi esercizi.
+Tracker palestra mobile-first per iPhone. Include splash introduttivo, onboarding profilo con obiettivo e saluto personalizzato, home animata, sessioni attive con indicatore globale, modalita forza/cardio/stretching, superset forza da 2 o 3 esercizi, timer pausa rapido, progressi dedicati con tracking e grafico peso, "I tuoi allenamenti" per template modificabili, "I miei esercizi" nel profilo, storico apribile, autocomplete sugli esercizi salvati e confronto progressivo tra sessioni per gli stessi esercizi.
 
 ## Avvio locale
 
