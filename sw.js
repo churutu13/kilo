@@ -1,4 +1,4 @@
-const CACHE_NAME = "kilo-v6";
+const CACHE_NAME = "kilo-v8";
 const APP_ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const APP_ASSETS = [
   "./app.js",
   "./manifest.webmanifest",
   "./icon.svg",
+  "./icon-512.png",
 ];
 
 self.addEventListener("install", (event) => {
