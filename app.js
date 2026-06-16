@@ -305,7 +305,7 @@ myExercisesList.addEventListener("click", (event) => {
 weightProgressPanel.addEventListener("submit", (event) => {
   event.preventDefault();
   const input = event.target.querySelector("[name='weeklyWeight']");
-  addWeightEntry(input.value.trim(), true);
+  addWeightEntry(input.value.trim(), true, true);
   renderProgressPage();
 });
 
@@ -314,7 +314,8 @@ weightProgressPanel.addEventListener("click", (event) => {
   if (!point) return;
   const readout = weightProgressPanel.querySelector("#weightChartReadout");
   if (!readout) return;
-  readout.textContent = `${point.dataset.weight} kg · ${point.dataset.date}`;
+  const count = Number(point.dataset.count) || 1;
+  readout.textContent = `${point.dataset.weight} kg · ${point.dataset.date} · ${count} ${count === 1 ? "misurazione" : "misurazioni"}`;
 });
 
 async function handleTemplateListClick(event) {
@@ -1698,7 +1699,7 @@ function renderProgressPage() {
   const progressItems = getProgressItems();
   const effortProgress = renderEffortProgress();
   renderWeightProgress();
-  progressPageEmpty.hidden = progressItems.length > 0 || Boolean(effortProgress);
+  progressPageEmpty.hidden = progressItems.length > 0 || Boolean(effortProgress) || state.weightEntries.length > 0;
   progressPageList.innerHTML = `${effortProgress}${progressItems.map(renderProgressItem).join("")}`;
 }
 
@@ -1758,15 +1759,17 @@ function renderEffortGroup(group) {
 
 function renderWeightProgress() {
   const entries = [...state.weightEntries].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const weeklyEntries = getWeeklyWeightAverages(entries);
   const latest = entries.at(-1);
-  const previous = entries.at(-2);
+  const latestWeek = weeklyEntries.at(-1);
+  const previousWeek = weeklyEntries.at(-2);
   const profile = state.profile ?? {};
   const goal = profile.goal ?? "massa";
   const initialWeight = getInitialProfileWeight();
   const due = isWeightUpdateDue(latest?.date);
-  const delta = latest && previous ? latest.weight - previous.weight : 0;
-  const initialDelta = latest && initialWeight ? latest.weight - initialWeight : 0;
-  const isGoalAligned = isWeightGoalAligned(goal, initialDelta, Boolean(latest && initialWeight));
+  const weeklyDelta = latestWeek && previousWeek ? latestWeek.weight - previousWeek.weight : 0;
+  const initialDelta = latestWeek && initialWeight ? latestWeek.weight - initialWeight : 0;
+  const isGoalAligned = isWeightGoalAligned(goal, initialDelta, Boolean(latestWeek && initialWeight));
   const goalCopy = goal === "perdere-peso"
     ? "Obiettivo: perdere peso"
     : "Obiettivo: massa";
@@ -1784,30 +1787,30 @@ function renderWeightProgress() {
       <div class="progress-grid two-up">
         <div>
           <span>Variazione assoluta</span>
-          <strong class="${deltaClass(initialDelta)}">${latest && initialWeight ? `${formatSigned(initialDelta)} kg` : "0"}</strong>
-          <small>${initialWeight ? `dal peso iniziale ${formatNumber(initialWeight)} kg` : "peso iniziale mancante"}</small>
+          <strong class="${deltaClass(initialDelta)}">${latestWeek && initialWeight ? `${formatSigned(initialDelta)} kg` : "0"}</strong>
+          <small>${initialWeight ? `dalla media iniziale ${formatNumber(initialWeight)} kg` : "peso iniziale mancante"}</small>
         </div>
         <div>
-          <span>Ultima variazione</span>
-          <strong>${latest && previous ? `${formatSigned(delta)} kg` : "0"}</strong>
-          <small>${previous ? `da ${formatDate(previous.date)}` : "primo dato"}</small>
+          <span>Media settimanale</span>
+          <strong>${latestWeek ? `${formatNumber(latestWeek.weight)} kg` : "0"}</strong>
+          <small>${previousWeek ? `${formatSigned(weeklyDelta)} kg dalla settimana prima` : "primo dato"}</small>
         </div>
       </div>
-      ${entries.length >= 2 ? renderWeightChart(entries) : ""}
+      ${weeklyEntries.length >= 2 ? renderWeightChart(weeklyEntries) : ""}
       <details class="weight-entry-toggle">
         <summary>
           <div>
-            <h4>Nuova misurazione peso</h4>
-            <span>${due ? "Promemoria settimanale" : "Aggiorna quando vuoi"}</span>
+            <h4>Misurazione peso</h4>
+            <span>${due ? "Da aggiornare" : "Aggiorna quando vuoi"}</span>
           </div>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
         </summary>
         <form class="weekly-weight-form">
           <label class="field">
             <span>Peso</span>
-            <input name="weeklyWeight" type="text" inputmode="decimal" placeholder="Aggiorna peso" required />
+            <input name="weeklyWeight" type="text" inputmode="decimal" placeholder="Peso di oggi" required />
           </label>
-          <button class="primary-action" type="submit">Aggiorna peso</button>
+          <button class="primary-action" type="submit">Salva peso</button>
         </form>
       </details>
     </article>
@@ -1832,7 +1835,7 @@ function renderWeightChart(entries) {
   return `
     <div class="weight-chart" aria-label="Grafico peso">
       <div class="weight-chart-heading">
-        <span>Andamento peso</span>
+        <span>Media settimanale</span>
         <strong>${formatNumber(min)}-${formatNumber(max)} kg</strong>
       </div>
       <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Andamento del peso corporeo">
@@ -1846,12 +1849,13 @@ function renderWeightChart(entries) {
             tabindex="0"
             data-weight-point
             data-weight="${formatNumber(point.entry.weight)}"
-            data-date="${formatDate(point.entry.date)}"
-            aria-label="${formatNumber(point.entry.weight)} kg, ${formatDate(point.entry.date)}"
+            data-date="${escapeAttribute(point.entry.label ?? formatDate(point.entry.date))}"
+            data-count="${point.entry.count ?? 1}"
+            aria-label="${formatNumber(point.entry.weight)} kg, ${escapeAttribute(point.entry.label ?? formatDate(point.entry.date))}"
           />
         `).join("")}
       </svg>
-      <div class="weight-chart-readout" id="weightChartReadout">Tocca un punto per leggere il peso</div>
+      <div class="weight-chart-readout" id="weightChartReadout">Tocca un punto per leggere la media</div>
     </div>
   `;
 }
@@ -2613,17 +2617,19 @@ function cloneSessionExercises(exercises) {
 function getProgressItems() {
   const performances = new Map();
 
-  [...state.history].reverse().forEach((workout) => {
-    const groupedExercises = groupExercisesByName(workout.exercises.filter((exercise) => (exercise.type ?? "strength") === "strength"));
+  [...state.history]
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .forEach((workout) => {
+      const groupedExercises = groupExercisesByName(workout.exercises.filter((exercise) => (exercise.type ?? "strength") === "strength"));
 
-    groupedExercises.forEach((sets, key) => {
-      const item = buildPerformance(key, sets, workout.date);
-      if (!performances.has(key)) {
-        performances.set(key, []);
-      }
-      performances.get(key).push(item);
+      groupedExercises.forEach((sets, key) => {
+        const item = buildPerformance(key, sets, workout.date);
+        if (!performances.has(key)) {
+          performances.set(key, []);
+        }
+        performances.get(key).push(item);
+      });
     });
-  });
 
   return [...performances.values()]
     .filter((items) => items.length >= 2)
@@ -2747,6 +2753,46 @@ function getInitialProfileWeight() {
   const profileWeight = parseDecimal(state.profile?.weight ?? "");
   if (profileWeight) return profileWeight;
   return [...state.weightEntries].sort((a, b) => new Date(a.date) - new Date(b.date))[0]?.weight ?? 0;
+}
+
+function getWeeklyWeightAverages(entries) {
+  const weeks = new Map();
+
+  entries.forEach((entry) => {
+    const weight = Number(entry.weight);
+    if (!Number.isFinite(weight)) return;
+    const date = new Date(entry.date);
+    if (Number.isNaN(date.getTime())) return;
+
+    const weekStart = getWeekStart(date);
+    const key = weekStart.toISOString().slice(0, 10);
+    const existing = weeks.get(key) ?? {
+      date: weekStart.toISOString(),
+      label: `Settimana ${formatDate(weekStart)}`,
+      weights: [],
+    };
+
+    existing.weights.push(weight);
+    weeks.set(key, existing);
+  });
+
+  return [...weeks.values()]
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .map((week) => ({
+      id: week.date,
+      date: week.date,
+      label: week.label,
+      count: week.weights.length,
+      weight: week.weights.reduce((sum, weight) => sum + weight, 0) / week.weights.length,
+    }));
+}
+
+function getWeekStart(date) {
+  const weekStart = new Date(date);
+  weekStart.setHours(0, 0, 0, 0);
+  const day = weekStart.getDay() || 7;
+  weekStart.setDate(weekStart.getDate() - day + 1);
+  return weekStart;
 }
 
 function countSessionSets(exercises) {
